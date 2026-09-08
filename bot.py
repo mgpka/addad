@@ -12,17 +12,25 @@ OWNER_ID = 1460392381
 DATA_FILE = "config.json"
 VIDEO_PATH = "video.mp4"
 
+# الشعار الثابت في جميع الحالات
+TITLE_HEADER = "👑 <b>الأمراء | 𝔞𝔩 𝔭𝔯𝔧𝔫𝔠𝔢𝔰</b>\n"
+DEFAULT_CAPTION = (
+    f"{TITLE_HEADER}"
+    "⏱️ <b>تحدي العداد</b>\n"
+    "━━━━━━━━━━━━\n"
+    "العداد: <code>00.00</code> ثانية\n\n"
+    "اضغط <b>بدء</b> لتشغيل العداد :"
+)
+
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
 # ================= إدارة وحفظ البيانات =================
-DEFAULT_CAPTION = "⏱️ <b>تحدي العداد</b>\n━━━━━━━━━━━━\nالعداد: <code>00.00</code> ثانية\n\nاضغط <b>بدء</b> لتشغيل الحساب:"
-
 def load_data():
     default_config = {
         "admins": [],
         "show_live": False,
-        "mode": "private",  # 'private' أو 'public'
+        "mode": "private",
         "cached_video_id": None,
         "custom_caption": DEFAULT_CAPTION
     }
@@ -44,7 +52,7 @@ def save_data(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 active_games = {}
-active_triggers = {}  # {message_id: user_id_who_typed_3addad}
+active_triggers = {}
 user_states = {}
 
 # ================= سيرفر ويب لـ Render =================
@@ -124,12 +132,12 @@ def panel_actions(call):
 
     elif call.data == "btn_edit_caption":
         user_states[call.from_user.id] = "waiting_for_caption"
-        bot.send_message(call.message.chat.id, "✍️ أرسل الآن النص (الكليشة) الجديد الذي تريده أن يظهر تحت الفيديو:")
+        bot.send_message(call.message.chat.id, "✍️ أرسل الآن النص الجديد للعداد (سيبقى شعار الأمراء ثابتاً في الأعلى تلقائياً):")
         bot.answer_callback_query(call.id)
 
     elif call.data == "btn_change_video":
         user_states[call.from_user.id] = "waiting_for_video"
-        bot.send_message(call.message.chat.id, "🎬 أرسل الآن الفيديو الجديد أو صورة الـ GIF مباشرة هنا بالمحادثة:")
+        bot.send_message(call.message.chat.id, "🎬 أرسل الآن الفيديو الجديد أو الـ GIF هنا بالمحادثة:")
         bot.answer_callback_query(call.id)
 
     elif call.data == "btn_list_admins":
@@ -143,7 +151,7 @@ def panel_actions(call):
 
     elif call.data == "btn_add_admin":
         user_states[call.from_user.id] = "waiting_for_admin_id"
-        bot.send_message(call.message.chat.id, "✍️ أرسل الآن <b>الآيدي الرقمي (ID)</b> الخاص بالأدمن المطلوب إضافته:", parse_mode="HTML")
+        bot.send_message(call.message.chat.id, "✍️ أرسل الآن <b>الآيدي الرقمي (ID)</b> للأدمن المطلوب إضافته:", parse_mode="HTML")
         bot.answer_callback_query(call.id)
 
     elif call.data == "btn_del_admin":
@@ -171,7 +179,7 @@ def panel_actions(call):
         else:
             bot.answer_callback_query(call.id, "لم يتم العثور على هذا الأدمن.")
 
-# ================= معالجة الرسائل الخاصة بلوحة التحكم =================
+# ================= معالجة المدخلات من الخاص =================
 @bot.message_handler(func=lambda msg: msg.chat.type == "private" and msg.from_user.id in user_states, content_types=['text', 'video', 'animation', 'document'])
 def handle_owner_inputs(msg):
     state = user_states.get(msg.from_user.id)
@@ -193,9 +201,9 @@ def handle_owner_inputs(msg):
 
     elif state == "waiting_for_caption":
         if msg.text:
-            data["custom_caption"] = msg.text
+            data["custom_caption"] = f"{TITLE_HEADER}{msg.text}"
             save_data(data)
-            bot.send_message(msg.chat.id, "✅ تم تحديث كليشة الفيديو بنجاح!")
+            bot.send_message(msg.chat.id, "✅ تم تحديث كليشة العداد بنجاح!")
         else:
             bot.send_message(msg.chat.id, "⚠️ يرجى إرسال رسالة نصية.")
 
@@ -211,13 +219,13 @@ def handle_owner_inputs(msg):
         if file_id:
             data["cached_video_id"] = file_id
             save_data(data)
-            bot.send_message(msg.chat.id, "✅ تم تعيين وحفظ الفيديو الجديد بنجاح!")
+            bot.send_message(msg.chat.id, "✅ تم حفظ وتعيين الفيديو الجديد بنجاح!")
         else:
             bot.send_message(msg.chat.id, "⚠️ يرجى إرسال ملف فيديو أو GIF حصراً.")
 
     user_states.pop(msg.from_user.id, None)
 
-# ================= نظام اللعبة داخل المجموعات =================
+# ================= نظام اللعبة داخل الكروب =================
 @bot.message_handler(func=lambda msg: msg.text and msg.text.strip() == "عداد")
 def counter_trigger(msg):
     data = load_data()
@@ -248,7 +256,6 @@ def counter_trigger(msg):
             sent_msg = bot.send_message(msg.chat.id, caption_text, reply_markup=markup, parse_mode="HTML")
 
     if sent_msg:
-        # تسجيل الشخص الذي فتح التحدي لمنع التخريب
         active_triggers[sent_msg.message_id] = msg.from_user.id
 
 @bot.callback_query_handler(func=lambda call: call.data in ["game_start", "game_stop"])
@@ -265,7 +272,6 @@ def counter_logic(call):
     # 1. بدء العداد
     if call.data == "game_start":
         creator_id = active_triggers.get(msg_id)
-        # التحقق: فقط كاتب "عداد" أو مالك البوت يمكنه الضغط على بدء
         if creator_id and user.id != creator_id and user.id != OWNER_ID:
             bot.answer_callback_query(call.id, "⚠️ فقط الشخص الذي كتب كلمة «عداد» أو المالك يمكنه بدء التحدي!", show_alert=True)
             return
@@ -279,7 +285,13 @@ def counter_logic(call):
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("🔴 إيقاف", callback_data="game_stop"))
 
-        run_caption = f"⏱️ <b>تحدي العداد</b>\n━━━━━━━━━━━━\n👤 اللاعب: <b>{user.first_name}</b>\nالعداد: <code>يحسب الآن... ⏳</code>"
+        run_caption = (
+            f"{TITLE_HEADER}"
+            "⏱️ <b>تحدي العداد</b>\n"
+            "━━━━━━━━━━━━\n"
+            f"👤 اللاعب: <b>{user.first_name}</b>\n"
+            "العداد: <code>يحسب الآن... ⏳</code>"
+        )
 
         try:
             bot.edit_message_caption(chat_id=chat_id, message_id=msg_id, caption=run_caption, reply_markup=markup, parse_mode="HTML")
@@ -297,7 +309,13 @@ def counter_logic(call):
                     elapsed = time.time() - active_games[msg_id]["start_time"]
                     if elapsed >= 100.00:
                         break
-                    live_caption = f"⏱️ <b>تحدي العداد</b>\n━━━━━━━━━━━━\n👤 اللاعب: <b>{user.first_name}</b>\nالعداد: <code>{elapsed:.2f}</code> ثانية"
+                    live_caption = (
+                        f"{TITLE_HEADER}"
+                        "⏱️ <b>تحدي العداد</b>\n"
+                        "━━━━━━━━━━━━\n"
+                        f"👤 اللاعب: <b>{user.first_name}</b>\n"
+                        f"العداد: <code>{elapsed:.2f}</code> ثانية"
+                    )
                     try:
                         bot.edit_message_caption(chat_id=chat_id, message_id=msg_id, caption=live_caption, reply_markup=markup, parse_mode="HTML")
                     except Exception:
@@ -312,7 +330,6 @@ def counter_logic(call):
             bot.answer_callback_query(call.id, "العداد متوقف بالفعل!", show_alert=True)
             return
 
-        # التحقق: فقط اللاعب الذي ضغط بدء أو المالك يمكنه الإيقاف
         if session["user_id"] != user.id and user.id != OWNER_ID:
             bot.answer_callback_query(call.id, "⚠️ فقط اللاعب الذي بدأ التحدي أو المالك يمكنه إيقافه!", show_alert=True)
             return
@@ -322,7 +339,13 @@ def counter_logic(call):
         elapsed = min(stop_time - session["start_time"], 100.00)
         formatted_score = f"{elapsed:.2f}"
 
-        stop_caption = f"🛑 <b>تم إيقاف العداد!</b>\n━━━━━━━━━━━━\n👤 اللاعب: <b>{user.first_name}</b>\nتم إرسال النتيجة للإدارة."
+        stop_caption = (
+            f"{TITLE_HEADER}"
+            "🛑 <b>تم إيقاف العداد!</b>\n"
+            "━━━━━━━━━━━━\n"
+            f"👤 اللاعب: <b>{user.first_name}</b>\n"
+            "تم إرسال النتيجة للإدارة."
+        )
 
         try:
             bot.edit_message_caption(chat_id=chat_id, message_id=msg_id, caption=stop_caption, reply_markup=None, parse_mode="HTML")
@@ -332,13 +355,11 @@ def counter_logic(call):
             except Exception:
                 pass
 
-        # تنبيه علوي بدون إظهار أي رقم للاعب
         bot.answer_callback_query(call.id, "تم إيقاف العداد بنجاح! ✅")
 
-        # تقرير النتيجة الكامل
         chat_title = call.message.chat.title if call.message.chat.title else "محادثة خاصة"
         report_text = (
-            f"🎯 <b>نتيجة جديدة لتحدي العداد:</b>\n"
+            f"🎯 <b>نتيجة جديدة لتحدي العداد ({TITLE_HEADER.strip()}):</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"👤 <b>اللاعب:</b> {user.first_name}\n"
             f"🏷️ <b>اليوزر:</b> {username}\n"
@@ -347,7 +368,6 @@ def counter_logic(call):
             f"💬 <b>المجموعة:</b> {chat_title}"
         )
 
-        # 1. إذا كان الوضع عاماً: إرسال النتيجة للاعب بالخاص
         if mode == "public":
             try:
                 bot.send_message(
@@ -358,13 +378,11 @@ def counter_logic(call):
             except Exception:
                 pass
 
-        # 2. إرسال التقرير للمالك دائماً
         try:
             bot.send_message(OWNER_ID, report_text, parse_mode="HTML")
         except Exception:
             pass
 
-        # 3. إرسال التقرير للأدمنية
         for adm in data.get("admins", []):
             try:
                 bot.send_message(int(adm), report_text, parse_mode="HTML")
@@ -374,8 +392,13 @@ def counter_logic(call):
         active_games.pop(msg_id, None)
         active_triggers.pop(msg_id, None)
 
-# ================= تشغيل البوت =================
+# ================= تشغيل البوت بحماية من التصادم =================
 if __name__ == "__main__":
     threading.Thread(target=run_web, daemon=True).start()
-    print("البوت شغال بكافة الميزات الاحترافية...")
-    bot.infinity_polling(skip_pending=True)
+    print("البوت شغال بكافة الميزات وشعار الأمراء...")
+    while True:
+        try:
+            bot.infinity_polling(skip_pending=True, timeout=20)
+        except Exception as e:
+            print(f"Polling conflict or error: {e}")
+            time.sleep(5)

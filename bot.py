@@ -10,6 +10,7 @@ from telebot import types
 BOT_TOKEN = "8941758329:AAExarUzaAMiABkBKpPjQAcordNyve8SmhI"
 OWNER_ID = 1460392381
 DATA_FILE = "config.json"
+VIDEO_PATH = "video.mp4"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
@@ -17,14 +18,14 @@ app = Flask(__name__)
 # ================= حفظ واسترجاع البيانات =================
 def load_data():
     if not os.path.exists(DATA_FILE):
-        data = {"admins": [], "show_live": False}
+        data = {"admins": [], "show_live": False, "cached_video_id": None}
         save_data(data)
         return data
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
-        return {"admins": [], "show_live": False}
+        return {"admins": [], "show_live": False, "cached_video_id": None}
 
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -107,7 +108,7 @@ def panel_actions(call):
         user_states[call.from_user.id] = "waiting_for_admin_id"
         bot.send_message(
             call.message.chat.id,
-            "✍️ أرسل الآن <b>الآيدي الرقمي (ID)</b> الخاص بالأدمن:\n<i>(ملاحظة: تليجرام يتطلب الآيدي الرقمي لكي يستطيع البوت مراسلته بالخاص)</i>",
+            "✍️ أرسل الآن <b>الآيدي الرقمي (ID)</b> الخاص بالأدمن:\n<i>(ملاحظة: تليجرام يتطلب الآيدي الرقمي حصراً)</i>",
             parse_mode="HTML"
         )
         bot.answer_callback_query(call.id)
@@ -144,7 +145,7 @@ def receive_admin_id(msg):
     val = msg.text.strip().replace("@", "")
     
     if not val.isdigit():
-        bot.send_message(msg.chat.id, "⚠️ يرجى إرسال الآيدي الرقمي حصراً (أرقام فقط) حتى يتمكن البوت من مراسلته بالخاص.")
+        bot.send_message(msg.chat.id, "⚠️ يرجى إرسال الآيدي الرقمي حصراً (أرقام فقط).")
         user_states.pop(msg.from_user.id, None)
         return
 
@@ -152,24 +153,44 @@ def receive_admin_id(msg):
     if target not in data["admins"]:
         data["admins"].append(target)
         save_data(data)
-        bot.send_message(msg.chat.id, f"✅ تم حفظ الأدمن <code>{target}</code> بنجاح!\nتأكد أن يضغط الأدمن /start في البوت ليستلم الرسائل.", parse_mode="HTML")
+        bot.send_message(msg.chat.id, f"✅ تم حفظ الأدمن <code>{target}</code> بنجاح!\nتأكد أن يضغط الأدمن /start في البوت.", parse_mode="HTML")
     else:
         bot.send_message(msg.chat.id, "⚠️ هذا المعرّف مضاف مسبقاً.")
     
     user_states.pop(msg.from_user.id, None)
 
-# ================= نظام اللعبة داخل الكروب =================
+# ================= نظام اللعبة داخل الكروب مع الفيديو =================
 @bot.message_handler(func=lambda msg: msg.text and msg.text.strip() == "عداد")
 def counter_trigger(msg):
+    data = load_data()
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🟢 بدء", callback_data="game_start"))
 
-    bot.send_message(
-        msg.chat.id,
-        "⏱️ <b>تحدي العداد</b>\n━━━━━━━━━━━━\nالعداد: <code>00.00</code> ثانية\n\nاضغط <b>بدء</b> لتشغيل الحساب:",
-        reply_markup=markup,
-        parse_mode="HTML"
-    )
+    caption_text = "⏱️ <b>تحدي العداد</b>\n━━━━━━━━━━━━\nالعداد: <code>00.00</code> ثانية\n\nاضغط <b>بدء</b> لتشغيل الحساب:"
+    cached_id = data.get("cached_video_id")
+
+    # إرسال الفيديو إما من التخزين المؤقت أو من الملف
+    sent_msg = None
+    if cached_id:
+        try:
+            sent_msg = bot.send_animation(msg.chat.id, cached_id, caption=caption_text, reply_markup=markup, parse_mode="HTML")
+        except Exception:
+            cached_id = None
+
+    if not sent_msg:
+        if os.path.exists(VIDEO_PATH):
+            with open(VIDEO_PATH, "rb") as video_file:
+                sent_msg = bot.send_animation(msg.chat.id, video_file, caption=caption_text, reply_markup=markup, parse_mode="HTML")
+                # حفظ file_id للاستخدام الفوري لاحقاً
+                if sent_msg.animation:
+                    data["cached_video_id"] = sent_msg.animation.file_id
+                    save_data(data)
+                elif sent_msg.video:
+                    data["cached_video_id"] = sent_msg.video.file_id
+                    save_data(data)
+        else:
+            # في حال لم يُرفع ملف الفيديو بعد
+            sent_msg = bot.send_message(msg.chat.id, caption_text, reply_markup=markup, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: call.data in ["game_start", "game_stop"])
 def counter_logic(call):
@@ -192,13 +213,16 @@ def counter_logic(call):
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("🔴 إيقاف", callback_data="game_stop"))
 
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=msg_id,
-            text=f"⏱️ <b>تحدي العداد</b>\n━━━━━━━━━━━━\n👤 اللاعب: <b>{user.first_name}</b>\nالعداد: <code>يحسب الآن... ⏳</code>",
-            reply_markup=markup,
-            parse_mode="HTML"
-        )
+        run_caption = f"⏱️ <b>تحدي العداد</b>\n━━━━━━━━━━━━\n👤 اللاعب: <b>{user.first_name}</b>\nالعداد: <code>يحسب الآن... ⏳</code>"
+
+        try:
+            bot.edit_message_caption(chat_id=chat_id, message_id=msg_id, caption=run_caption, reply_markup=markup, parse_mode="HTML")
+        except Exception:
+            try:
+                bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=run_caption, reply_markup=markup, parse_mode="HTML")
+            except Exception:
+                pass
+
         bot.answer_callback_query(call.id, "تم تشغيل العداد!")
 
         if show_live:
@@ -207,14 +231,9 @@ def counter_logic(call):
                     elapsed = time.time() - active_games[msg_id]["start_time"]
                     if elapsed >= 100.00:
                         break
+                    live_caption = f"⏱️ <b>تحدي العداد</b>\n━━━━━━━━━━━━\n👤 اللاعب: <b>{user.first_name}</b>\nالعداد: <code>{elapsed:.2f}</code> ثانية"
                     try:
-                        bot.edit_message_text(
-                            chat_id=chat_id,
-                            message_id=msg_id,
-                            text=f"⏱️ <b>تحدي العداد</b>\n━━━━━━━━━━━━\n👤 اللاعب: <b>{user.first_name}</b>\nالعداد: <code>{elapsed:.2f}</code> ثانية",
-                            reply_markup=markup,
-                            parse_mode="HTML"
-                        )
+                        bot.edit_message_caption(chat_id=chat_id, message_id=msg_id, caption=live_caption, reply_markup=markup, parse_mode="HTML")
                     except Exception:
                         pass
                     time.sleep(1.5)
@@ -236,16 +255,19 @@ def counter_logic(call):
         elapsed = min(stop_time - session["start_time"], 100.00)
         formatted_score = f"{elapsed:.2f}"
 
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=msg_id,
-            text=f"🛑 <b>تم إيقاف العداد!</b>\n━━━━━━━━━━━━\n👤 اللاعب: <b>{user.first_name}</b>\nتم إرسال النتيجة للإدارة.",
-            reply_markup=None,
-            parse_mode="HTML"
-        )
+        stop_caption = f"🛑 <b>تم إيقاف العداد!</b>\n━━━━━━━━━━━━\n👤 اللاعب: <b>{user.first_name}</b>\nتم إرسال النتيجة للإدارة."
+
+        try:
+            bot.edit_message_caption(chat_id=chat_id, message_id=msg_id, caption=stop_caption, reply_markup=None, parse_mode="HTML")
+        except Exception:
+            try:
+                bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=stop_caption, reply_markup=None, parse_mode="HTML")
+            except Exception:
+                pass
+
         bot.answer_callback_query(call.id, f"توقفت عند {formatted_score} ثانية!")
 
-        # تقرير النتيجة
+        # تقرير النتيجة للمالك والأدمنية
         chat_title = call.message.chat.title if call.message.chat.title else "محادثة خاصة"
         report_text = (
             f"🎯 <b>نتيجة جديدة لتحدي العداد:</b>\n"
@@ -257,13 +279,11 @@ def counter_logic(call):
             f"💬 <b>المجموعة:</b> {chat_title}"
         )
 
-        # الإرسال للمالك
         try:
             bot.send_message(OWNER_ID, report_text, parse_mode="HTML")
         except Exception:
             pass
 
-        # الإرسال للأدمنية
         for adm in data.get("admins", []):
             try:
                 bot.send_message(int(adm), report_text, parse_mode="HTML")
